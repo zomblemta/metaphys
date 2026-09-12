@@ -1,0 +1,21 @@
+# 密钥：config.yaml 引用 $DEEPSEEK_API_KEY，真值只存在于 .env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# M0 spike 产物：kerykeion 出的星盘 SVG，属临时验证输出
+spikes/_svg_out/
+
+# M3 星盘 SVG 输出目录（astro.svg_dir 的默认值）。
+# 这些是**用户出生信息**渲染出来的图，属个人数据，绝不入库。
+var/
+
+# 前端
+node_modules/
+.next/
+out/

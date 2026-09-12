@@ -1,0 +1,48 @@
+[project]
+name = "metaphys"
+version = "0.1.0"
+description = "玄学 Agent —— 八字命理与西方星盘的排盘与解读"
+requires-python = ">=3.12"
+dependencies = [
+    # --- 排盘引擎（M1）---
+    "lunar-python>=1.4.8",
+    "kerykeion>=5.12.9",
+    "pyswisseph>=2.10.3.2",
+    "pydantic>=2.0",
+    # --- Agent 层（M2）---
+    # 版本下限对齐 deer-flow 实测通过的组合（langchain 1.3.14 / langgraph 1.2.9），
+    # 该组合已验证过 AgentMiddleware 的六个钩子与 create_agent 五参装配。
+    "langgraph>=1.2.9,<2",
+    "langchain>=1.3.14,<2",
+    "langchain-core>=1.4.9,<2",
+    "langchain-deepseek>=1.0.1,<2",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+# 沿用 mini-flow-2 的约定：harness 包通过 PYTHONPATH 引入，不打包安装。
+package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # 行宽由 formatter 处理
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "packages/harness"]

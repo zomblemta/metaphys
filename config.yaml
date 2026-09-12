@@ -1,0 +1,51 @@
+# metaphys 应用配置。
+#
+# 约定沿用 deer-flow / mini-flow-2：
+#   - 模型与工具都用**点分路径**注册（`use: 模块:对象`），运行时反射解析并做类型校验。
+#     加一个 provider 或工具只需改本文件，不必改代码。
+#   - `$ENV_VAR` 在加载时展开，**缺失即报错**（不是留空字符串）。
+#     静默留空会让服务起得来、请求时才炸，排障成本高得多。
+config_version: 1
+log_level: info
+
+models:
+  - name: deepseek-chat
+    display_name: DeepSeek Chat
+    use: langchain_deepseek:ChatDeepSeek
+    model: deepseek-chat
+    api_key: $DEEPSEEK_API_KEY
+    temperature: 0.7
+    # 不用 deepseek-reasoner：开 thinking 后 DeepSeek 要求每一条 assistant 消息
+    # 都回填 reasoning_content，而上游 ChatDeepSeek 会丢，多轮工具调用会直接报错。
+    # 详见 M2-FINDINGS「DeepSeek thinking 模式」一节。
+
+default_model: deepseek-chat
+
+tools:
+  - name: bazi_chart
+    use: metaphys.tools.builtins.bazi_chart:bazi_chart_tool
+  - name: lookup_birthplace
+    use: metaphys.tools.builtins.geo:lookup_birthplace_tool
+  - name: astro_chart
+    use: metaphys.tools.builtins.astro_chart:astro_chart_tool
+
+agent:
+  max_iterations: 12
+
+# 排盘参数。school 会一路传到 compute_bazi()，并写进命盘 JSON 供解读层标注前提。
+bazi:
+  school: ziping          # ziping | mangpai | xinpai
+  true_solar_time: true
+
+# 星盘参数。house_system 与 zodiac_type 是全部星盘结论的前提，
+# 与 bazi.school 同位 —— 会被写进星盘 JSON 供解读层标注。
+astro:
+  house_system: P        # kerykeion 的宫位制标识符：P 普拉西达斯（默认）| K 科赫 | A 等宫 | W 整宫 …
+  zodiac_type: tropical  # tropical 回归黄道（默认）| sidereal 恒星黄道
+  sidereal_mode:         # zodiac_type=sidereal 时**必须**填（如 LAHIRI），否则加载即报错
+  svg_dir: var/charts    # 星盘 SVG 输出目录；相对路径按本文件所在目录解析
+
+# M4 网关用。M2 不建 HTTP 层，此处先占位以免 M4 再改结构。
+gateway:
+  host: 0.0.0.0
+  port: 8010
