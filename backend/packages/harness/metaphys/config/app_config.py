@@ -153,11 +153,11 @@ class AstroConfig(BaseModel):
 
 
 class GatewayConfig(BaseModel):
-    """M4 的 HTTP 网关参数。M2 不建 HTTP 层，此处仅为结构占位。"""
+    """M4 本地 HTTP 网关参数。"""
 
     model_config = ConfigDict(extra="allow")
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = Field(default=8010, ge=1, le=65535)
 
 

@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: metaphys
+      POSTGRES_USER: metaphys
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random hexadecimal database password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metaphys -d metaphys"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  app:
+    build: .
+    environment:
+      METAPHYS_DATABASE_URL: postgresql://metaphys:${POSTGRES_PASSWORD}@db:5432/metaphys
+      METAPHYS_PUBLIC_ORIGIN: https://${METAPHYS_DOMAIN:?Set the domain}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set the model key}
+    volumes:
+      - charts:/app/var/charts
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 20s
+    security_opt:
+      - no-new-privileges:true
+  proxy:
+    image: caddy:2
+    environment:
+      METAPHYS_DOMAIN: ${METAPHYS_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  postgres_data:
+  charts:
+  caddy_data:
+  caddy_config:

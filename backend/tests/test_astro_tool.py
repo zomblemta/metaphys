@@ -404,14 +404,35 @@ def test_bazi_and_astro_coexist_in_one_thread(chart_dir: Path):
     assert merged["astro"] == _expected_chart()
 
 
-def test_re_running_the_astro_tool_replaces_only_the_astro_chart(chart_dir: Path):
-    """重排星盘是"替换"，不是"再来一张"，且不碰八字。"""
+def test_changing_the_subject_invalidates_the_previous_bazi_chart(chart_dir: Path):
+    """称呼改变视为命主资料变更，不能保留另一命主的八字。"""
     bazi = build_chart_command(gender="male", birth_datetime=_BIRTH_ISO, place=_PLACE, tool_call_id="b2")
     first = build_astro_command(birth_datetime=_BIRTH_ISO, place=_PLACE, name="旧", tool_call_id="a15")
     second = build_astro_command(birth_datetime=_BIRTH_ISO, place=_PLACE, name="新", tool_call_id="a16")
 
     merged = merge_charts(merge_charts(bazi.update["charts"], first.update["charts"]), second.update["charts"])
 
-    assert set(merged) == {"bazi", "astro"}
+    assert set(merged) == {"astro"}
     assert merged["astro"]["profile"]["name"] == "新"
-    assert merged["bazi"] == bazi.update["charts"]["bazi"]
+
+
+def test_svg_replace_failure_preserves_existing_file(tmp_path, monkeypatch, astro_chart_dict):
+    from types import SimpleNamespace
+
+    from metaphys.schemas.chart import AstroChart
+    from metaphys.tools.builtins.astro_chart import svg_filename, write_svg
+
+    chart = AstroChart.model_validate(astro_chart_dict)
+    path = tmp_path / svg_filename(chart.profile, chart)
+    path.write_text("original")
+    monkeypatch.setattr("metaphys.tools.builtins.astro_chart.resolve_svg_dir", lambda: tmp_path)
+    monkeypatch.setattr("metaphys.tools.builtins.astro_chart.render_svg", lambda result: "<svg/>")
+
+    def fail_replace(*args):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr("metaphys.tools.builtins.astro_chart.os.replace", fail_replace)
+    with pytest.raises(OSError):
+        write_svg(SimpleNamespace(chart=chart))
+    assert path.read_text() == "original"
+    assert list(tmp_path.iterdir()) == [path]

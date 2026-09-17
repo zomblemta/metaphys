@@ -19,20 +19,39 @@ from typing import Annotated, Any, NotRequired
 from langchain.agents import AgentState
 
 
+def chart_profile_key(chart: dict[str, Any]) -> tuple[Any, ...] | None:
+    """当前出生资料的版本标识。八字使用引擎转换后的公历钟表时间。"""
+    profile = chart.get("profile") or {}
+    if not profile:
+        return None
+    moment = chart.get("clock_time") or profile.get("birth_datetime")
+    return (
+        moment,
+        profile.get("latitude"),
+        profile.get("longitude"),
+        profile.get("time_accuracy"),
+        profile.get("name", ""),
+    )
+
+
 def merge_charts(
     existing: dict[str, dict[str, Any]] | None,
-    new: dict[str, dict[str, Any]] | None,
+    new: dict[str, dict[str, Any] | None] | None,
 ) -> dict[str, dict[str, Any]]:
     """按 ``kind`` 覆盖合并命盘。
 
     ``{"bazi": {...}}`` 合并后仍是单条 —— 重排盘的语义是"替换"，不是"再来一张"。
-    新增盘种（M3 的星盘）只需用新的 kind，互不干扰。
+    相同出生资料的盘种共存；出生资料变化时其它盘失效。None 可显式删除某种盘。
     """
     merged = dict(existing or {})
     for kind, chart in (new or {}).items():
-        # 空值不覆盖：reducer 可能被传入空 dict 表示"无变更"，
-        # 若照单全收会把已有的好盘抹成空。
-        if chart:
+        # None 是显式失效；空 dict 仍代表无变更。
+        if chart is None:
+            merged.pop(kind, None)
+        elif chart:
+            key = chart_profile_key(chart)
+            if key is not None:
+                merged = {k: v for k, v in merged.items() if chart_profile_key(v) == key}
             merged[kind] = chart
     return merged
 
@@ -40,8 +59,8 @@ def merge_charts(
 class ThreadState(AgentState):
     """会话状态。
 
-    除 ``messages`` 外的通道都是**给前端与审计用的**，不参与模型推理 ——
-    模型只通过 ToolMessage 读到命盘。
+    命盘同时用于前端、核验和每次模型调用的当前有效盘上下文；
+    历史 ToolMessage 保留用于追溯，不能视为当前盘。
     """
 
     #: 会话标题。首轮之后由总结生成，M2 只留通道。
@@ -56,7 +75,7 @@ class ThreadState(AgentState):
     #: Grounding 核验命中记录 —— 模型输出里出现了盘上没有的干支/神煞。
     grounding_flags: Annotated[list[dict[str, Any]], operator.add]
 
-    #: 安全合规标记。M5 才实现判定逻辑，M2 只留通道。
+    #: 安全规则审计历史。当前答复标记由 AIMessage 的 safety_categories 提取。
     safety_flags: Annotated[list[str], operator.add]
 
 

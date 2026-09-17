@@ -67,7 +67,9 @@ class NonexistentLocalTimeError(ValueError):
 
 
 def _naive(moment: datetime) -> datetime:
-    return moment.replace(tzinfo=None)
+    if moment.tzinfo is not None:
+        raise ValueError("需要无时区的当地钟表时间，不能忽略显式 UTC 偏移")
+    return moment
 
 
 def is_dst_active(clock_time: datetime) -> bool:

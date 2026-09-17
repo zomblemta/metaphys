@@ -226,7 +226,7 @@ def bazi_chart_tool(
 
     Args:
         gender: 性别，male 或 female。
-        birth_datetime: 出生日期时间，ISO 8601 格式，如 1990-06-15T10:30:00。
+        birth_datetime: 出生地当地钟表时间，不含 Z 或 UTC 偏移，ISO 8601 格式，如 1990-06-15T10:30:00。
             只知道日期时就只传日期（如 1990-06-15），此时时柱会被略去。
         place: 出生地，尽量给到区县，如「辽宁省朝阳市」。留空则沿用上一次排盘
             的出生地。

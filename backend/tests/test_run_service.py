@@ -36,7 +36,7 @@ _ASTRO_TOOL_NAME = "astro_chart"
 
 #: 实测：一轮「模型 → 工具 → 模型」走过的 superstep 数。写死在这里当基准，
 #: 换算系数若被改小到跑不完一轮，下面的用例会红。
-_MEASURED_SUPERSTEPS_PER_TOOL_ROUND = 7
+_MEASURED_SUPERSTEPS_PER_TOOL_ROUND = 9
 
 
 def _tool_call(name: str, args: dict[str, Any], call_id: str) -> AIMessage:
@@ -323,6 +323,43 @@ def test_astream_run_yields_updates_then_a_final_event(build_scripted_graph, cha
     assert events[-1]["data"]["charts"]["bazi"]
     nodes = [event["node"] for event in events if event["event"] == "update"]
     assert "model" in nodes and "tools" in nodes
+
+
+def test_astream_run_uses_the_run_id_it_is_given(build_scripted_graph):
+    """调用方传入的 ``run_id`` 必须出现在**每一个**事件上。
+
+    一轮运行会在 harness、应用日志、审计与对外事件里各出现一次。两层各生成
+    一个 id 的话，这四处指向四个不同的轮次，出问题时无从对照 —— 而"漏了
+    某一种事件"比"全都没有"更难发现，所以逐条断言而不是只看第一条。
+    """
+    graph = build_scripted_graph([AIMessage("你好。")])
+
+    async def collect() -> list[dict[str, Any]]:
+        return [event async for event in RunService(graph=graph).astream_run("你好", run_id="fixed-run-id")]
+
+    events = asyncio.run(collect())
+
+    assert events, "没有事件"
+    assert {event["run_id"] for event in events} == {"fixed-run-id"}
+
+
+def test_astream_run_generates_one_run_id_per_call(build_scripted_graph):
+    """不传 ``run_id`` 时维持旧行为：每轮一个 uuid4，且两轮不同。
+
+    默认值保留是为了脚本与单测能继续一句 ``astream_run("排盘")`` 就跑起来 ——
+    但如果它变成"整个进程共用一个 id"，那些脚本的事件就再也分不开轮次了。
+    """
+    graph = build_scripted_graph([AIMessage("你好。")])
+    service = RunService(graph=graph)
+
+    async def collect() -> list[list[dict[str, Any]]]:
+        return [[event async for event in service.astream_run("你好")] for _ in range(2)]
+
+    first, second = asyncio.run(collect())
+
+    assert len({event["run_id"] for event in first}) == 1, "同一轮内有多个 run_id"
+    assert len({event["run_id"] for event in second}) == 1, "同一轮内有多个 run_id"
+    assert first[0]["run_id"] != second[0]["run_id"], "两轮共用了同一个 run_id"
 
 
 @pytest.mark.parametrize("thread_id", ["", "带中文的-id", "a" * 200])

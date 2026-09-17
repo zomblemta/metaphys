@@ -1,6 +1,17 @@
 # metaphys —— 交接文档（给 AI 读者）
 
-> 生成日期：2026-09-12 · 对应状态：M0–M3 已完成
+> **最新：Next.js + M5 第一版已交付。** 前端为 Next.js App Router / React / TypeScript；安全输入短路、输出替换与审计已实现。最新契约与验收见 `NEXTJS-M5-FINDINGS.md`，启动见 `README.md`。下文原生前端、M5 仅通道等描述属于历史状态。
+
+
+> **M4 最新交付（2026-09-12）：** 本地网关与前端已完成，启动见 `README.md`，当前范围、验收与限制见 `M4-FINDINGS.md`。本文件下文保留早期规划和基线；其中“M4 未开始/前端为空”的描述已过时。真实模型联调与 M5 仍未完成。
+
+
+> 更新日期：2026-09-12 · M0–M3 后设计审查修复已完成，M4/M5 尚未交付
+>
+> **修复后的当前契约以 `DESIGN-FIXES.md` 为准。** 本文其余历史验收数字为修复前基线。
+> 当前 `make check`：451 passed、15 skipped；新增 23 项设计回归。
+> 核验失败会撤回本轮错误正文；命盘仅在相同出生资料下共存；显式时区输入被拒绝；
+> 历史近似时间可通过用户本轮确认句升级；SSE 仅输出进度和核验结束后的 JSON 结果。
 > 本文的读者是**接下来要在这个仓库里干活的人或 AI**。它只回答两件事：
 > **后面要做什么**，以及**哪些事不要做**。
 >
@@ -42,7 +53,7 @@ ruff check 与 ruff format --check 全绿。443 项中跳过的 15 项是 `test_
 
 | 事实 | 证据 / 复现 |
 |---|---|
-| **这个目录不是 git 仓库**（有 `.gitignore` 但没有 `.git`）。M0–M3 的唯一记录就是四个 findings 文件 | `git rev-parse --is-inside-work-tree` → `fatal: not a git repository` |
+| **当前目录是 git 仓库**；原交接时的环境描述已经过时 | `git rev-parse --is-inside-work-tree` → `true` |
 | **裸 `python` 在这台机器上不存在**，一律用 `backend/.venv/bin/python` | `python` → `command not found` |
 | `config.yaml` 在**仓库根**，不在 `backend/` | 路径：`metaphys/config.yaml` |
 | `config.yaml` 里的 `$DEEPSEEK_API_KEY` **缺失即报错**，不会静默变空串 | `config/app_config.py`；`.env.example` 亦如此声明 |
@@ -79,7 +90,7 @@ ruff check 与 ruff format --check 全绿。443 项中跳过的 15 项是 `test_
 - 语言包传参形态：正面 + 反面样本（多包一层 `{"CN": ...}` 必须被发现）。
 - 含 `../` 的 `name` 不会让产物跑出输出目录；工具自己建目录。
 - 非 `exact` 出生时间一律拒绝星盘（`hour_known` / 未知 / 只给日期都算）。
-- 同一 thread 先八字后星盘 → **两张盘都在**（`merge_charts` 按 kind 覆盖，互不抹掉）。
+- 同一 thread 先八字后星盘 → **相同出生资料的两张盘都在**；资料变更时旧盘失效。
 - 模型输出里的编造会被抓：星座错 · 宫位错（阿拉伯数字与中文数字各一）· 相位错 ·
   命中必带可定位的上下文片段。
 - 不误报：散文中提到盘外星座不报；「火星是天蝎座的守护星」这类句子不报。
@@ -163,7 +174,7 @@ make test-live                              # -rs，跳过原因会打印出来
 
 已经定下来的约束（来自 M2/M3 findings，不是我的推断）：
 
-1. **网关直接转发 `astream_run` 的事件，不要二次加工** —— 前端要的正是"哪个节点产出了什么"。
+1. **网关转发 `astream_run` 的公开 JSON 事件**：update 仅含进度，final 才含答复；禁止直接暴露原始图状态。详见 `DESIGN-FIXES.md`。
 2. **SVG 按 `artifact["svg_path"]` 取文件，且不要把 `svg_dir` 做成可列举的静态目录。**
    文件名是出生信息 + 排盘前提的哈希（`astro-<16位>.svg`），但目录可列举就等于
    把所有用户的盘摊开。
@@ -205,7 +216,7 @@ make test-live                              # -rs，跳过原因会打印出来
 
 1. **HTTP 框架**？—— 代码注释里出现的是 FastAPI（护栏的 `FORBIDDEN_ROOTS` 也含
    `fastapi`/`starlette`/`uvicorn`），但这是**从注释反推的，用户从未确认**。
-2. **SSE 事件形状**？—— 直接透传 LangGraph 事件，还是包一层带 `type` 的信封。
+2. **SSE 事件形状**：设计修复已明确 v1 公开事件，见 `DESIGN-FIXES.md`，不再透传 LangGraph 对象。
 3. **SVG 怎么伺服**？—— 受控路由（推荐，天然不可列举）vs 静态目录挂载。见 §3 P1.2。
 4. **前端本轮是否交付**？—— `frontend/` 是空目录，技术栈未定（`.gitignore` 里
    预留了 `node_modules/`、`.next/`、`out/`，暗示 Next.js，但同样**未经确认**）。
@@ -262,7 +273,7 @@ make check       # lint + format --check + test —— 提交前跑这个
 ### 6.2 目录
 
 ```
-metaphys/                        # 仓库根（不是 git 仓库）
+metaphys/                        # 仓库根（已有 git 仓库）
 ├── config.yaml                  # 模型 / 工具 / 排盘参数 / 网关占位
 ├── .env.example                 # 复制成 .env 填真实 key
 ├── M0-FINDINGS.md … M3-FINDINGS.md   # 每期的实测结论 —— 唯一的历史记录
@@ -289,8 +300,7 @@ metaphys/                        # 仓库根（不是 git 仓库）
    "不会崩溃、只会静默给错"那一类（地名默认 Greenwich、SVG 写进用户主目录、
    文件名可路径穿越、时区整盘平移看不出来……）。测试在这里的职责不是覆盖率，
    是**把静默的错变成响的错**。
-3. 新发现的实测结论写进 findings 文件，**不要**只留在代码注释里 —— 这个仓库没有
-   git 历史，findings 是唯一的跨期记忆。
+3. 新发现的实测结论写进 findings 文件，**不要**只留在代码注释里 —— findings 是项目跨期记忆的一部分。
 4. 报告状态时如实：**跑过就说跑过，跳过就说跳过**（`make check` 里那 15 个 `s` 就是坑）。
 
 ---

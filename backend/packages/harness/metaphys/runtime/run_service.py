@@ -1,7 +1,7 @@
 """运行服务 —— 驱动 lead agent 的单一入口。
 
 M2 用它跑端到端验证脚本；M4 的 FastAPI/SSE 层把 :meth:`RunService.astream_run`
-的事件原样转发给前端，不再二次加工。
+的公开 JSON 事件转发给前端；内部 LangGraph 状态不会直接出现在事件里。
 
 把"跑一轮对话"收在一处，是因为有三件事容易在各个调用点各写一遍、进而各错一遍：
 线程 id 怎么定、递归上限怎么算、从终态里读哪些字段。尤其是**递归上限** ——
@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.graph.state import CompiledStateGraph
@@ -29,10 +30,10 @@ DEFAULT_THREAD_ID = "default"
 
 #: 一轮"模型 → 工具 → 模型"实测走几个 superstep。注册的 ``after_model`` 钩子各自
 #: 是一个图节点，所以不是直觉上的 2。实测值见 tests/test_run_service.py。
-_SUPERSTEPS_PER_ITERATION = 4
+_SUPERSTEPS_PER_ITERATION = 5
 
 #: 收尾那一轮模型调用（不再调工具）的固定开销。
-_FINAL_SUPERSTEPS = 3
+_FINAL_SUPERSTEPS = 4
 
 
 def _recursion_limit(app_config: AppConfig) -> int:
@@ -102,10 +103,30 @@ class RunResult:
         """
         return self.charts.get("astro")
 
+    @property
+    def response_flags(self) -> list[dict[str, Any]]:
+        """当前答复的核验结果，历史审计不影响新一轮答复状态。"""
+        for message in reversed(self.messages):
+            if isinstance(message, AIMessage):
+                return [flag for flag in self.grounding_flags if message.id and flag.get("message_id") == message.id]
+        return []
+
+    @property
+    def response_safety(self) -> list[str]:
+        for message in reversed(self.messages):
+            if isinstance(message, AIMessage):
+                return list(message.additional_kwargs.get("safety_categories") or [])
+        return []
+
     def as_dict(self) -> dict[str, Any]:
         """JSON 可序列化的摘要，供 SSE 推送。"""
         return {
             "reply": self.reply,
+            "response_status": "safety_redirect"
+            if self.response_safety
+            else ("withheld" if self.response_flags else "completed"),
+            "response_safety": self.response_safety,
+            "response_flags": self.response_flags,
             "charts": self.charts,
             "birth_profile": self.birth_profile,
             "grounding_flags": list(self.grounding_flags),
@@ -170,17 +191,25 @@ class RunService:
         message: str,
         *,
         thread_id: str = DEFAULT_THREAD_ID,
+        run_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """流式跑一轮，逐个 superstep 产出事件。
 
         事件两种：
 
-        - ``{"event": "update", "node": <节点名>, "data": <该节点的状态增量>}``
-        - ``{"event": "final", "data": <RunResult.as_dict()>}``
+        - ``update``：仅含节点名与运行进度，不发送未核验文本或工具内部消息。
+        - ``final``：核验节点完成后的 ``RunResult.as_dict()``。
 
-        直接用 LangGraph 的 ``updates`` 增量而不是自己解析消息 —— M4 要推给前端的
-        正是"哪个节点产出了什么"，在这里抽成别的形状等于把信息丢掉再猜回来。
+        每个事件带 ``schema_version=1`` 与同一轮的 ``run_id``，可直接 JSON 序列化。
+        ``node`` 仅供诊断；前端逻辑应依赖 event/data，不依赖内部中间件名称。
+        此处没有 HTTP 鉴权或 SVG 下载路由，M4 必须单独实现资源归属校验。
+
+        ``run_id`` 由调用方传入时就用它，否则现生成一个。**应用层应当传入**：
+        一轮运行会在 harness、应用日志、审计与对外事件里各出现一次，两层各生成
+        一个 id 的话，这四处就指向四个不同的轮次，出问题时无从对照。默认值保留
+        是为了脚本与单测能继续一句 ``astream_run("排盘")`` 就跑起来。
         """
+        run_id = run_id or str(uuid4())
         final_state: dict[str, Any] | None = None
 
         async for mode, payload in self.graph.astream(
@@ -189,12 +218,23 @@ class RunService:
             stream_mode=["updates", "values"],
         ):
             if mode == "updates":
-                for node, update in (payload or {}).items():
-                    yield {"event": "update", "node": node, "data": update or {}}
+                for node in payload or {}:
+                    yield {
+                        "event": "update",
+                        "schema_version": 1,
+                        "run_id": run_id,
+                        "node": node,
+                        "data": {"status": "running"},
+                    }
             elif mode == "values":
                 final_state = payload
 
-        yield {"event": "final", "data": RunResult.from_state(final_state).as_dict()}
+        yield {
+            "event": "final",
+            "schema_version": 1,
+            "run_id": run_id,
+            "data": RunResult.from_state(final_state).as_dict(),
+        }
 
 
 @lru_cache(maxsize=1)

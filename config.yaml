@@ -45,7 +45,7 @@ astro:
   sidereal_mode:         # zodiac_type=sidereal 时**必须**填（如 LAHIRI），否则加载即报错
   svg_dir: var/charts    # 星盘 SVG 输出目录；相对路径按本文件所在目录解析
 
-# M4 网关用。M2 不建 HTTP 层，此处先占位以免 M4 再改结构。
+# M4 本地网关：单进程运行；对外部署前需要持久化与完整身份认证。
 gateway:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8010

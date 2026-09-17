@@ -1,0 +1,9 @@
+{$METAPHYS_DOMAIN} {
+    header Strict-Transport-Security "max-age=31536000"
+    request_body {
+        max_size 24KB
+    }
+    reverse_proxy app:8010 {
+        flush_interval -1
+    }
+}

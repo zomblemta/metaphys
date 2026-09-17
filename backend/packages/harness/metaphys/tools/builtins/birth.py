@@ -14,9 +14,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 
+from metaphys.agents.messages import message_text
 from metaphys.tools.builtins.geo import resolve_place
 from metaphys.tools.types import Runtime
 
@@ -78,6 +79,23 @@ def parse_birth_datetime(raw: str) -> tuple[datetime | None, bool]:
     except ValueError:
         return None, False
     return moment, ("T" in text or ":" in text)
+
+
+def confirms_birth_time(runtime: Runtime | None, moment: datetime) -> bool:
+    """只接受当前用户消息中的明确确认，不采信模型参数或历史确认。
+
+    提供可复制的确认句，避免对“是/不是/大概”等自然语言作不可靠的猜测。
+    """
+    state = getattr(runtime, "state", None) or {}
+    for message in reversed(state.get("messages") or []):
+        if isinstance(message, HumanMessage):
+            text = message_text(message).strip().replace("：", ":")
+            prefix = "确认出生时间:"
+            if not text.startswith(prefix):
+                return False
+            confirmed, has_time = parse_birth_datetime(text[len(prefix) :].strip())
+            return has_time and confirmed == moment and confirmed.tzinfo is None
+    return False
 
 
 def prior_birth_profile(runtime: Runtime | None) -> dict[str, Any] | None:

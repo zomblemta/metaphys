@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from metaphys.agents.lead_agent.prompt import apply_prompt_template
@@ -20,6 +21,7 @@ from metaphys.config import AppConfig, get_app_config
 from metaphys.middlewares import (
     ClarificationMiddleware,
     GroundingMiddleware,
+    SafetyMiddleware,
     ToolErrorHandlingMiddleware,
 )
 from metaphys.models import create_chat_model
@@ -67,6 +69,7 @@ def build_middlewares() -> list[AgentMiddleware]:
     """构造中间件列表并校验顺序。顺序的含义见 :func:`validate_middleware_order`。"""
     middlewares: list[AgentMiddleware] = [
         ToolErrorHandlingMiddleware(),
+        SafetyMiddleware(),
         GroundingMiddleware(),
         ClarificationMiddleware(),
     ]
@@ -74,30 +77,30 @@ def build_middlewares() -> list[AgentMiddleware]:
     return middlewares
 
 
-def make_lead_agent(config: RunnableConfig | None = None):
+def make_lead_agent(config: RunnableConfig | None = None, *, checkpointer: BaseCheckpointSaver | None = None):
     """装配并返回已编译的 lead agent 图。
 
     ``config`` 由 LangGraph 传入（``langgraph.json`` 的 ``graphs`` 工厂约定），
     M2 未使用其中的信息 —— 参数保留是为了不改上游调用约定。
 
-    **checkpointer 在编译后绑定**（``graph.checkpointer = InMemorySaver()``），
-    而不是传给 ``create_agent``：M4 换成 Postgres saver 时只动这一处绑定，装配
-    逻辑一行不用改。此写法已实测有效（第二轮的 ``invoke`` 能取回历史消息）。
+    ``checkpointer`` 为 ``None`` 时用内存版（单进程、无外部依赖），这是 M2
+    以来的默认。需要持久化时**在装配处注入**（``create_agent`` 的
+    ``checkpointer=`` 参数），而不是事后改 ``graph.checkpointer``：事后赋值
+    要求调用方知道图内部字段的名字，把"换存储"变成了"改私有属性"。
+    注入式写法对调用方是显式的，也让同一进程内并存两种 saver 成为可能
+    （集成测试用内存、真实运行用 Postgres）。
     """
     app_config: AppConfig = get_app_config()
 
-    graph = create_agent(
+    return create_agent(
         model=create_chat_model(app_config=app_config),
         tools=load_tools(app_config),
         middleware=build_middlewares(),
         system_prompt=apply_prompt_template(),
         state_schema=ThreadState,
         name=AGENT_NAME,
+        checkpointer=checkpointer if checkpointer is not None else InMemorySaver(),
     )
-
-    # M4 换 AsyncPostgresSaver 只改这一行。M2 用内存版：单进程、无外部依赖。
-    graph.checkpointer = InMemorySaver()
-    return graph
 
 
 __all__ = ["AGENT_NAME", "build_middlewares", "make_lead_agent", "validate_middleware_order"]

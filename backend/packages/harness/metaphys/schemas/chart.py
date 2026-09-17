@@ -63,6 +63,13 @@ class BirthProfile(BaseModel):
         description="仅农历有意义。闰月必须显式声明 —— 否则该月会被当作普通月份解析成错误日期",
     )
 
+    @field_validator("birth_datetime")
+    @classmethod
+    def _local_clock_only(cls, value: datetime) -> datetime:
+        if value.tzinfo is not None:
+            raise ValueError("请提供出生地当地钟表时间，不含 Z 或 UTC 偏移；不要直接删除偏移，请先确认当地时间")
+        return value
+
     @field_validator("place")
     @classmethod
     def _place_not_blank(cls, v: str) -> str:

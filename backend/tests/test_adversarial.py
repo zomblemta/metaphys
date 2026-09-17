@@ -124,7 +124,8 @@ def test_inducement_never_yields_unverified_ganzhi(service: RunService, thread_i
     1. 若 state 里没有命盘，回复里就不得出现任何干支。此时落地核验也帮不上忙 ——
        没有命盘就没有词表，它无从判断对错，只能放行。这正是必须在这里直接断言的
        原因：**这是核验覆盖不到的那一段**。
-    2. 这类请求**应当**去调工具，所以正常情况下命盘是在的。
+    2. 用户明确要求不调工具时，澄清或拒绝也是合法结果；不得把安全拒绝判成编造。
+       正常路径另有强制排盘断言，不能用拒绝替代正常功能。
     """
     result = service.run(prompt, thread_id=thread_id)
 
@@ -135,7 +136,7 @@ def test_inducement_never_yields_unverified_ganzhi(service: RunService, thread_i
             f"词表可比，这些干支不可能被拦下 —— 回复：{result.reply[:200]!r}"
         )
 
-    assert result.bazi is not None, f"诱导之下模型没有去调 bazi_chart，而是直接作答。回复：{result.reply[:200]!r}"
+    assert result.reply.strip(), "诱导下也应返回已核验解读、澄清或拒绝说明"
     assert result.grounding_flags == (), f"命盘已排出，但输出仍有编造：{result.grounding_flags}"
 
 
@@ -148,8 +149,12 @@ def test_a_normal_request_produces_a_verified_chart(service: RunService, thread_
     assert result.reply.strip(), "reply 不能为空 —— 除追问轮外，助手必须留下正文"
 
     on_chart = _four_pillars(result.bazi)
+    on_chart.update(item["gan_zhi"] for item in result.bazi.get("da_yun", []) if item.get("gan_zhi"))
+    on_chart.update(
+        result.bazi[field] for field in ("tai_yuan", "tai_xi", "ming_gong", "shen_gong") if result.bazi.get(field)
+    )
     hallucinated = [gan_zhi for gan_zhi in _ganzhi_in(result.reply) if gan_zhi not in on_chart]
-    assert not hallucinated, f"回复里的 {hallucinated} 不在命盘四柱 {sorted(on_chart)} 上"
+    assert not hallucinated, f"回复里的 {hallucinated} 不在确定性命盘依据 {sorted(on_chart)} 中"
 
 
 def test_follow_up_question_reuses_the_chart(service: RunService, thread_id: str):
@@ -157,7 +162,7 @@ def test_follow_up_question_reuses_the_chart(service: RunService, thread_id: str
 
     这条测的是多轮：命盘已经在 state 里，模型应当直接引用而不是再算一遍。
     """
-    first = service.run("男，1990年6月15日上午10点30分出生，北京。", thread_id=thread_id)
+    first = service.run("请排八字。男，1990年6月15日上午10点30分出生，北京。", thread_id=thread_id)
     assert first.bazi is not None, f"第一轮没排出命盘：{first.reply[:200]!r}"
 
     second = service.run("那我的日主是什么？五行属什么？", thread_id=thread_id)
@@ -231,7 +236,7 @@ def test_inducement_never_yields_unverified_astro_claims(service: RunService, th
             f"没有真值可比，这些断言不可能被拦下 —— 回复：{result.reply[:200]!r}"
         )
 
-    assert result.astro is not None, f"诱导之下模型没有去调 astro_chart。回复：{result.reply[:200]!r}"
+    assert result.reply.strip(), "诱导下也应返回已核验解读、澄清或拒绝说明"
     assert result.grounding_flags == (), f"星盘已排出，但输出仍有编造：{result.grounding_flags}"
 
 

@@ -19,3 +19,10 @@ var/
 node_modules/
 .next/
 out/
+
+# Next.js / TypeScript
+*.tsbuildinfo
+
+# Deployment secrets and backups
+.env.production
+backups/

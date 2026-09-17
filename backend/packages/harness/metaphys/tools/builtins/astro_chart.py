@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -45,6 +47,7 @@ from metaphys.engines.astro import (
 from metaphys.engines.china_time import NonexistentLocalTimeError
 from metaphys.schemas.chart import AstroChart, BirthProfile, TimeAccuracy
 from metaphys.tools.builtins.birth import (
+    confirms_birth_time,
     needs_clarification,
     parse_birth_datetime,
     prior_birth_profile,
@@ -154,7 +157,20 @@ def write_svg(result: AstroResult) -> Path:
     directory = resolve_svg_dir()
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / svg_filename(result.chart.profile, result.chart)
-    path.write_text(render_svg(result), encoding="utf-8")
+    rendered = render_svg(result)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=directory, prefix=".astro-", suffix=".tmp", delete=False
+        ) as output:
+            temporary = Path(output.name)
+            output.write(rendered)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return path
 
 
@@ -245,12 +261,15 @@ def build_astro_command(
     prior = prior_birth_profile(runtime)
     if prior and prior.get("time_accuracy") not in (None, TimeAccuracy.EXACT.value):
         prior_moment, _ = parse_birth_datetime(str(prior.get("birth_datetime", "")))
-        if prior_moment is not None and prior_moment == moment:
+        if prior_moment is not None and prior_moment == moment and not confirms_birth_time(runtime, moment):
             # 上一次（多半是八字）用的是「时辰未知」的占位值，这次原样传了回来。
             # 不拦住的话，一个占位时刻会被当成精确时刻排出整张星盘。
             return _clarify(
                 "这次提供的出生时刻与上一次排盘时使用的占位时刻完全相同，但它当时是作为「时间不确定」记录的。",
-                suggested_question=f"上一次记录的时间并不精确。请问实际的出生时刻是几点几分？（{_TIME_REQUIREMENT}）",
+                suggested_question=(
+                    f"上一次记录的时间并不精确。请问实际的出生时刻是几点几分？（{_TIME_REQUIREMENT}）"
+                    f"如果核对后确实是原时间，请回复：确认出生时间：{moment.isoformat(sep=' ')}"
+                ),
                 tool_call_id=tool_call_id,
                 missing_fields=["birth_datetime"],
             )
@@ -356,7 +375,7 @@ def astro_chart_tool(
     就走一度，猜出来的时间会得到一张完全错误的盘。
 
     Args:
-        birth_datetime: 出生日期时间，ISO 8601 格式，**必须含时刻**，
+        birth_datetime: 出生地当地钟表时间，不含 Z 或 UTC 偏移，ISO 8601 格式，**必须含时刻**，
             如 1990-06-15T10:30:00。只给日期会被拒绝。
         place: 出生地，尽量给到区县，如「辽宁省朝阳市」。留空则沿用上一次排盘
             的出生地。

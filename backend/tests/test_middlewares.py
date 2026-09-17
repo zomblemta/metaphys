@@ -860,3 +860,15 @@ def test_passing_tools_are_returned_untouched():
     sentinel = ToolMessage("正常结果", tool_call_id="c")
 
     assert mw.wrap_tool_call(request, lambda _: sentinel) is sentinel
+
+
+@pytest.mark.parametrize(
+    "label,field", [("胎元", "tai_yuan"), ("命宫", "ming_gong"), ("身宫", "shen_gong"), ("胎息", "tai_xi")]
+)
+def test_auxiliary_ganzhi_checks_field_identity(label, field):
+    chart = {field: "癸酉", "day_master": "甲", "year_pillar": {"stem": "甲", "branch": "子"}}
+    assert find_fabrications(f"{label}是癸酉", chart) == []
+    assert any(flag["kind"] == "auxiliary" for flag in find_fabrications(f"{label}是甲子", chart))
+    assert find_fabrications(f"{label}是癸酉", {})
+    # Birth metadata cannot whitelist invented numerical claims.
+    assert find_fabrications("胎元是丙寅", {**chart, "profile": {"name": "丙寅"}})

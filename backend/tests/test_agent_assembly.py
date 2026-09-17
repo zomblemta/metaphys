@@ -24,6 +24,7 @@ from metaphys.agents.lead_agent.agent import AGENT_NAME, build_middlewares
 from metaphys.middlewares import (
     ClarificationMiddleware,
     GroundingMiddleware,
+    SafetyMiddleware,
     ToolErrorHandlingMiddleware,
 )
 from metaphys.tools import load_tools
@@ -45,6 +46,7 @@ def test_middleware_order_is_exactly_as_designed():
     """
     assert [type(m) for m in build_middlewares()] == [
         ToolErrorHandlingMiddleware,
+        SafetyMiddleware,
         GroundingMiddleware,
         ClarificationMiddleware,
     ]
@@ -152,6 +154,22 @@ def test_graph_compiles_with_the_expected_tools():
 
     tool_names = {tool.name for tool in load_tools()}
     assert {"bazi_chart", "lookup_birthplace", ASK_CLARIFICATION_TOOL_NAME} <= tool_names
+
+
+def test_a_checkpointer_can_be_injected_at_assembly_time():
+    """注入的 checkpointer 必须真的被用上，且是**编译时**注入的。
+
+    事后赋值（``graph.checkpointer = …``）要求调用方知道图内部字段的名字，
+    把"换存储"变成"改私有属性"。注入式写法对调用方是显式的，也让同一进程
+    里并存两种 saver 成为可能（集成测试用内存、真实运行用 Postgres）。
+
+    这里用哨兵而不是 ``InMemorySaver()``：拿一个同类型的新对象去比，
+    "注入生效"和"默认值恰好也是这个类型"分不出来。
+    """
+    sentinel = InMemorySaver()
+    graph = agent_module.make_lead_agent(checkpointer=sentinel)
+
+    assert graph.checkpointer is sentinel, "注入的 checkpointer 没有生效"
 
 
 def test_clarification_is_mounted_unconditionally():

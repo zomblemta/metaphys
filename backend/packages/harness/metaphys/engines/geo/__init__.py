@@ -66,16 +66,17 @@ def normalize(name: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _index() -> tuple[dict[str, GeoPoint], dict[str, list[GeoPoint]], dict[str, GeoPoint]]:
+def _index() -> tuple[dict[str, GeoPoint], dict[str, list[GeoPoint]], dict[str, GeoPoint], dict[str, GeoPoint]]:
     """构建查找索引。首次调用时加载数据，之后缓存。
 
     Returns:
-        (按市全名, 按短名到候选列表, 按省短名到省会/首条)
+        (按市全名, 按短名到候选列表, 按省短名到省会/首条, 按完整行政区划名)
     """
     raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
     by_city: dict[str, GeoPoint] = {}
     by_short: dict[str, list[GeoPoint]] = {}
     by_province: dict[str, GeoPoint] = {}
+    by_full: dict[str, GeoPoint] = {}
 
     def _is_center(area: str) -> bool:
         """市级中心条目：直辖市为空串，普通地级市为"市辖区"。"""
@@ -102,18 +103,34 @@ def _index() -> tuple[dict[str, GeoPoint], dict[str, list[GeoPoint]], dict[str, 
 
         by_province.setdefault(normalize(province), point)
 
-    return by_city, by_short, by_province
+        # 完整行政区划名（省+市+区县）单独建键。短名键会把同名异地混在一起
+        # （「朝阳」既是北京朝阳区也是辽宁朝阳市），而写全名的用户其实已经把
+        # 地方指死了 —— 没有这个键，他就得为自己已经答过的问题再答一次，且
+        # 答案无处可填。display_name 在数据集中唯一（见 test_place_resolution
+        # 的自检），setdefault 只是防止将来数据出现重名时静默覆盖。
+        by_full.setdefault(point.display_name, point)
+
+    return by_city, by_short, by_province, by_full
 
 
 def lookup_candidates(place: str) -> list[GeoPoint]:
-    """返回所有匹配的候选地点。歧义（如"朝阳区"）时返回多条。"""
-    by_city, by_short, by_province = _index()
+    """返回所有匹配的候选地点。歧义（如"朝阳区"）时返回多条。
+
+    匹配顺序是**具体优先**：市全名 → 完整行政区划名 → 短名 → 省名。写全名的人
+    不该被短名的歧义牵连 —— 「北京市朝阳区」指名道姓是一处地方，而「朝阳区」
+    才需要问。
+    """
+    by_city, by_short, by_province, by_full = _index()
     s = place.strip()
     if not s:
         return []
 
     if s in by_city:
         return [by_city[s]]
+
+    full = by_full.get(s)
+    if full is not None:
+        return [full]
 
     hits = by_short.get(normalize(s))
     if hits:
